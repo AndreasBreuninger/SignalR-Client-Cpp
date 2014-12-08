@@ -32,7 +32,7 @@ namespace signalr
         connection_impl& operator=(const connection_impl&) = delete;
 
         pplx::task<void> start();
-        pplx::task<void> send(utility::string_t data);
+        pplx::task<void> send(const utility::string_t &data);
 
         connection_state get_connection_state() const;
 

@@ -179,7 +179,7 @@ namespace signalr
         }
     }
 
-    pplx::task<void> connection_impl::send(utility::string_t data)
+    pplx::task<void> connection_impl::send(const utility::string_t& data)
     {
         auto connection_state = get_connection_state();
         if (connection_state != connection_state::connected)

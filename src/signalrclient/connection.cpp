@@ -21,7 +21,7 @@ namespace signalr
         return m_pImpl->start();
     }
 
-    pplx::task<void> connection::send(utility::string_t data)
+    pplx::task<void> connection::send(const utility::string_t& data)
     {
         return m_pImpl->send(data);
     }
