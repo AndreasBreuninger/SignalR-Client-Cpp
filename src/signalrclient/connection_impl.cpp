@@ -34,6 +34,12 @@ namespace signalr
         {
             shutdown().get();
         }
+        catch (const pplx::task_canceled&)
+        {
+            // we must not reset the connection in case of task_canceled exception. This exception trhown from the
+            // `shutdown` means that a `stop` call is in progress and resetting connection could impact the other call
+            return;
+        }
         catch (...) // must not throw from destructors
         { }
 
@@ -102,7 +108,8 @@ namespace signalr
                 {
                     previous_task.get();
                     connection->m_start_completed_event.set();
-                    connection->change_state(connection_state::connecting, connection_state::connected);
+                    auto old_state = connection->change_state(connection_state::connected);
+                    _ASSERTE(old_state == connection_state::connecting);
                     start_tce.set();
                 }
                 catch (const std::exception &e)
@@ -120,9 +127,9 @@ namespace signalr
                             .append(utility::conversions::to_string_t(e.what())));
                     }
 
-                    connection->m_start_completed_event.set();
                     connection->m_transport = nullptr;
-                    connection->change_state(connection_state::connecting, connection_state::disconnected);
+                    connection->m_start_completed_event.set();
+                    connection->change_state(connection_state::disconnected);
                     start_tce.set_exception(std::current_exception());
                 }
             });
@@ -249,15 +256,9 @@ namespace signalr
     {
         auto connection = shared_from_this();
         return shutdown()
-            .then([connection](pplx::task<void> disconnect_task)
+            .then([connection]()
             {
-                try
-                {
-                    disconnect_task.get();
-                }
-                catch (...)
-                { }
-
+                // we do let the exception through (especially the task_canceled exception)
                 connection->m_transport = nullptr;
                 connection->change_state(connection_state::disconnected);
         });
@@ -269,15 +270,25 @@ namespace signalr
         {
             std::lock_guard<std::mutex> lock(m_stop_lock);
             auto current_state = get_connection_state();
-            if (current_state == connection_state::disconnecting || current_state == connection_state::disconnected)
+            if (current_state == connection_state::disconnected)
             {
                 return pplx::task_from_result();
+            }
+
+            if (current_state == connection_state::disconnecting)
+            {
+                // `task_canceled` will be thrown when `stop` was called while another `stop` was already in progress.
+                // This is to prevent from resetting the `m_transport` in the upstream callers because doing so might
+                // affect the other invocation which is using it. We do rethrow it later which should signal that the
+                // API is not used correctly.
+                pplx::cancel_current_task();
             }
 
             change_state(connection_state::disconnecting);
 
             // we request a cancellation of the ongoing start request (if any) and wait until it is cancelled
             m_disconnect_cts.cancel();
+
             // TODO: should we use a timeout here and throw if it expires to avoid hangs? This would happen if an
             // ongoing start requests hangs.
             m_start_completed_event.wait();
@@ -327,9 +338,7 @@ namespace signalr
 
     bool connection_impl::change_state(connection_state old_state, connection_state new_state)
     {
-        connection_state expected_state{ old_state };
-
-        if (m_connection_state.compare_exchange_strong(expected_state, new_state, std::memory_order_seq_cst))
+        if (m_connection_state.compare_exchange_strong(old_state, new_state, std::memory_order_seq_cst))
         {
             handle_connection_state_change(old_state, new_state);
             return true;
@@ -358,6 +367,10 @@ namespace signalr
             .append(translate_connection_state(new_state)));
 
         // TODO: invoke state_changed callback
+        // Words of wisdom:
+        // "Be extra careful when you add this callback, because this is sometimes being called with the m_stop_lock.
+        // This could lead to interesting problems.For example, you could run into a segfault if the connection is
+        // stopped while / after transitioning into the connecting state."
     }
 
     utility::string_t connection_impl::translate_connection_state(connection_state state)

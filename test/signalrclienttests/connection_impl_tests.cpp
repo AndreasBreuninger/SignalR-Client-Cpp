@@ -297,9 +297,9 @@ TEST(connection_impl_process_response, process_response_logs_messages)
     connection->start().get();
 
     auto log_entries = std::dynamic_pointer_cast<memory_log_writer>(writer)->get_log_entries();
-    ASSERT_TRUE(log_entries.size() > 1);
+    ASSERT_FALSE(log_entries.empty());
 
-    auto entry = remove_date_from_log_entry(log_entries[1]);
+    auto entry = remove_date_from_log_entry(log_entries[0]);
     ASSERT_EQ(_XPLATSTR("[message     ] processing message: {\"S\":1, \"M\":[] }\n"), entry);
 }
 
@@ -583,7 +583,7 @@ TEST(connection_impl_stop, stopping_disconnected_connection_is_no_op)
     ASSERT_TRUE(log_entries.empty());
 }
 
-TEST(connection_impl_stop, stopping_disconnecting_connection_is_no_op)
+TEST(connection_impl_stop, stopping_disconnecting_connection_throws_task_canceled_exception)
 {
     pplx::event close_event;
     auto writer = std::shared_ptr<log_writer>{std::make_shared<memory_log_writer>()};
@@ -604,7 +604,15 @@ TEST(connection_impl_stop, stopping_disconnecting_connection_is_no_op)
 
     connection->start().get();
     auto stop_task = connection->stop();
-    connection->stop().get();
+
+    try
+    {
+        connection->stop().get();
+        ASSERT_FALSE(true); // exception expected but not thrown
+    }
+    catch (const pplx::task_canceled&)
+    { }
+
     close_event.set();
     stop_task.get();
 
@@ -715,11 +723,21 @@ TEST(connection_impl_stop, dtor_stops_the_connection)
 
 TEST(connection_impl_stop, stop_cancels_ongoing_start_request)
 {
+    auto disconnect_completed_event = std::make_shared<pplx::event>();
+
+    auto websocket_client = create_test_websocket_client(
+        /* receive function */ [disconnect_completed_event]()
+        {
+            disconnect_completed_event->wait();
+            return pplx::task_from_result(std::string("{\"S\":1, \"M\":[] }"));
+        });
+
     auto writer = std::shared_ptr<log_writer>{std::make_shared<memory_log_writer>()};
     auto connection = create_connection(std::make_shared<test_websocket_client>(), writer, trace_level::all);
 
     auto start_task = connection->start();
     connection->stop().get();
+    disconnect_completed_event->set();
 
     start_task.then([](pplx::task<void> t)
     {
