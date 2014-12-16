@@ -720,7 +720,6 @@ TEST(connection_impl_stop, dtor_stops_the_connection)
     ASSERT_EQ(_XPLATSTR("[state change] disconnecting -> disconnected\n"), remove_date_from_log_entry(log_entries[3]));
 }
 
-
 TEST(connection_impl_stop, stop_cancels_ongoing_start_request)
 {
     auto disconnect_completed_event = std::make_shared<pplx::event>();
@@ -753,11 +752,10 @@ TEST(connection_impl_stop, stop_cancels_ongoing_start_request)
     ASSERT_EQ(connection_state::disconnected, connection->get_connection_state());
 
     auto log_entries = std::dynamic_pointer_cast<memory_log_writer>(writer)->get_log_entries();
-    ASSERT_EQ(4, log_entries.size());
+    ASSERT_EQ(3, log_entries.size());
     ASSERT_EQ(_XPLATSTR("[state change] disconnected -> connecting\n"), remove_date_from_log_entry(log_entries[0]));
-    ASSERT_EQ(_XPLATSTR("[state change] connecting -> disconnecting\n"), remove_date_from_log_entry(log_entries[1]));
+    ASSERT_EQ(_XPLATSTR("[state change] connecting -> disconnected\n"), remove_date_from_log_entry(log_entries[1]));
     ASSERT_EQ(_XPLATSTR("[info        ] starting the connection has been cancelled.\n"), remove_date_from_log_entry(log_entries[2]));
-    ASSERT_EQ(_XPLATSTR("[state change] disconnecting -> disconnected\n"), remove_date_from_log_entry(log_entries[3]));
 }
 
 TEST(connection_impl_stop, stop_ignores_exceptions_from_abort_requests)

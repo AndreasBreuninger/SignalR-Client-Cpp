@@ -36,8 +36,10 @@ namespace signalr
         }
         catch (const pplx::task_canceled&)
         {
-            // we must not reset the connection in case of task_canceled exception. This exception trhown from the
-            // `shutdown` means that a `stop` call is in progress and resetting connection could impact the other call
+            // because we are in the dtor and the `connection_imp` is ref counted we should not get the `task_canceled`
+            // exception because it would indicate that some other thread/task still holds reference to this instance
+            // so how come we are in the dtor?
+            _ASSERTE(false);
             return;
         }
         catch (...) // must not throw from destructors
@@ -107,9 +109,16 @@ namespace signalr
                 try
                 {
                     previous_task.get();
+                    if (!connection->change_state(connection_state::connecting, connection_state::connected))
+                    {
+                        connection->m_logger.log(trace_level::errors,
+                            utility::string_t(_XPLATSTR("internal error - transition from an unexpected state. expected state: connecting, actual state: "))
+                            .append(translate_connection_state(connection->get_connection_state())));
+
+                        _ASSERTE(false);
+                    }
+
                     connection->m_start_completed_event.set();
-                    auto old_state = connection->change_state(connection_state::connected);
-                    _ASSERTE(old_state == connection_state::connecting);
                     start_tce.set();
                 }
                 catch (const std::exception &e)
@@ -118,7 +127,7 @@ namespace signalr
                     if (task_canceled_exception)
                     {
                         connection->m_logger.log(trace_level::info,
-                            utility::string_t(_XPLATSTR("starting the connection has been cancelled.")));
+                            _XPLATSTR("starting the connection has been cancelled."));
                     }
                     else
                     {
@@ -128,8 +137,8 @@ namespace signalr
                     }
 
                     connection->m_transport = nullptr;
-                    connection->m_start_completed_event.set();
                     connection->change_state(connection_state::disconnected);
+                    connection->m_start_completed_event.set();
                     start_tce.set_exception(std::current_exception());
                 }
             });
@@ -284,17 +293,24 @@ namespace signalr
                 pplx::cancel_current_task();
             }
 
-            change_state(connection_state::disconnecting);
-
             // we request a cancellation of the ongoing start request (if any) and wait until it is cancelled
             m_disconnect_cts.cancel();
 
-            // TODO: should we use a timeout here and throw if it expires to avoid hangs? This would happen if an
-            // ongoing start requests hangs.
-            m_start_completed_event.wait();
-
-            // if the start request was cancelled before the transport was started there is nothing left to do
+            // if the start request was cancelled before the transport was started there is nothing left to do.
             if (!m_transport)
+            {
+                return pplx::task_from_result();
+            }
+
+            while (m_start_completed_event.wait(60000) != 0)
+            {
+                m_logger.log(trace_level::errors,
+                    utility::string_t(_XPLATSTR("internal error - stopping the connection is still waiting for the start operation to finish which should have already finished or timed out")));
+            }
+
+            // at this point we are either in the connected or disconnected state. If we are in the disconnected state
+            // we must break because the transport have already been nulled out.
+            if (!change_state(connection_state::connected, connection_state::disconnecting))
             {
                 return pplx::task_from_result();
             }
