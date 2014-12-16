@@ -20,15 +20,15 @@ namespace signalr
         typedef std::function<void(const utility::string_t&)> message_received;
 
     public:
-        explicit connection(const utility::string_t& url, const utility::string_t& querystring = U(""),
+        SIGNALRCLIENT_API explicit connection(const utility::string_t& url, const utility::string_t& querystring = U(""),
             trace_level trace_level = trace_level::all, std::shared_ptr<log_writer> log_writer = std::make_shared<trace_log_writer>());
 
         // TODO: consider making connection class copyable to enable passing by value
-        connection(const connection&) = delete;
+        SIGNALRCLIENT_API connection(const connection&) = delete;
 
-        connection& operator=(const connection&) = delete;
+        SIGNALRCLIENT_API connection& operator=(const connection&) = delete;
 
-        ~connection();
+        SIGNALRCLIENT_API ~connection();
 
         SIGNALRCLIENT_API pplx::task<void> start();
 

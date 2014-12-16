@@ -134,6 +134,10 @@ namespace signalr
 
         try
         {
+            auto cts = pplx::cancellation_token_source();
+            cts.cancel();
+            pplx::create_task(cts.get_token())
+
             auto result = web::json::value::parse(response);
 
             auto messages = result[_XPLATSTR("M")];
